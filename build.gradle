@@ -12,6 +12,12 @@ buildscript {
     }
 }
 
-gradle.externalInjectedModules.each { String projName ->
+gradle.externalInjectedModules.each { String projName, List<String> moreSrcs  ->
+  logger.info "Project ${projName} and additional source dirs: ${moreSrcs}"
   apply from: rootProject.file('build.common.gradle'), to: project(projName)
+
+  moreSrcs.each { additionalSourceDir ->
+    logger.debug "Adding additional source: ${additionalSourceDir}"
+    project(projName).android.sourceSets.main.java.srcDir additionalSourceDir
+  }
 }

@@ -19,7 +19,8 @@ def validateConfigOptions(ConfigObject config) {
 
   def ftcContents = config.get('ftc')
   if (ftcContents) {
-    def extraContent = ftcContents.keySet() - ['type', 'name', 'enabled']
+    def extraContent =
+      ftcContents.keySet() - ['type', 'name', 'enabled', 'srcDirs']
 
     if (extraContent) {
       throw new GradleException("Invalid content: ${extraContent}")
@@ -79,12 +80,25 @@ if (settings.autoSearchByModuleFiles) {
       // NOTE: This is default type when not specified
       String type = config.ftc.type ?: 'external'
 
+      File moduleDir = moduleFile.parentFile
+      List<String> extraSrcs = []
+      if (config.ftc.srcDirs) {
+	extraSrcs = config.ftc.srcDirs.split(',')
+      }
+
       if (type == 'source') {
-	ftc.addExternalSourceSet(moduleFile.parentFile.canonicalPath)
+	if (extraSrcs) {
+	  extraSrcs.each { srcPath ->
+	    String relativePath = new File(moduleDir.name, srcPath.trim()).path
+	    ftc.addExternalSourceSet(relativePath)
+	  }
+	}
+	else {
+	  ftc.addExternalSourceSet(moduleDir.name)
+	}
 	logger.info 'Adding external sourceSet from moduleFile'
       }
       else {
-	File moduleDir = moduleFile.parentFile
 	String moduleName = config.ftc.name ?: moduleDir.name
 
 	if (type == 'external') {
@@ -92,7 +106,7 @@ if (settings.autoSearchByModuleFiles) {
 	  logger.info "Adding external module '${moduleName}' from moduleFile"
 	}
 	else if (type == 'injected') {
-	  ftc.addInjectedModule(moduleName, moduleDir.canonicalPath)
+	  ftc.addInjectedModule(moduleName, moduleDir.canonicalPath, extraSrcs)
 	  logger.info "Adding injected module '${moduleName} from moduleFile"
 	}
       }
@@ -138,7 +152,7 @@ class FtcSettings {
     this.settings.ext.dirNameSearchPattern = /[Tt]eam([0-9])+/
     this.settings.ext.externalModulePaths = [:]
     this.settings.gradle.ext.externalSourceFilePaths = []
-    this.settings.gradle.ext.externalInjectedModules = []
+    this.settings.gradle.ext.externalInjectedModules = [:]
   }
 
   void disableDefaultTeamModule() {
@@ -184,24 +198,45 @@ class FtcSettings {
     addInjectedModule(name, name)
   }
 
+  void addInjectedModule(String name, List<String> srcPaths) {
+    addInjectedModule(name, name, srcPaths)
+  }
+
   void addInjectedModule(String name, String path) {
+    addInjectedModule(name, path, null)
+  }
+
+  void addInjectedModule(String name, String path, List<String> srcPaths) {
     if (! name?.startsWith(':')) {
       name = ":${name}"
     }
 
     addExternalModule(name, path)
-    settings.gradle.externalInjectedModules << name
+    if (srcPaths) {
+      srcPaths = srcPaths.collect() { it.trim() }
+    }
+    else {
+      srcPaths = []
+    }
+
+    settings.gradle.externalInjectedModules << [(name): srcPaths]
   }
 
   void addExternalSourceSet(String path) {
     def sourceSetPath = new File(path)
+
+    boolean isSingleDir = (sourceSetPath.parent == null)
+
     if (! sourceSetPath.isAbsolute()) {
       sourceSetPath = new File(settings.rootDir.parent, path)
     }
 
-    File possibleSourcesRoot = new File(sourceSetPath, 'src/main/java')
-    if (possibleSourcesRoot.exists()) {
-      sourceSetPath = possibleSourcesRoot
+    // Try to find src/main/java if top-level directory selected
+    if (isSingleDir) {
+      File possibleSourcesRoot = new File(sourceSetPath, 'src/main/java')
+      if (possibleSourcesRoot.exists()) {
+	sourceSetPath = possibleSourcesRoot
+      }
     }
 
     settings.gradle.externalSourceFilePaths << sourceSetPath.canonicalPath
